@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"github.com/google/uuid"
 	"github.com/nex-gen-tech/jobsy/internal/task"
 )
 
@@ -13,7 +12,7 @@ type Storage interface {
 
 	// LoadTask loads the task with the specified ID from the storage.
 	// It returns the loaded task and an error if the task is not found.
-	LoadTask(id uuid.UUID) (*task.Task, error)
+	LoadTask(id string) (*task.Task, error)
 
 	// LoadAllTasks loads all tasks from the storage.
 	// It returns a slice of loaded tasks and an error if any.
@@ -21,9 +20,9 @@ type Storage interface {
 
 	// DeleteTask deletes the task with the specified ID from the storage.
 	// It returns an error if the task is not found or if there is an issue with deletion.
-	DeleteTask(id uuid.UUID) error
+	DeleteTask(id string) error
 
 	// UpdateTaskStatus updates the status of the task with the specified ID in the storage.
 	// It returns an error if the task is not found or if there is an issue with updating the status.
-	UpdateTaskStatus(id uuid.UUID, status task.Status) error
+	UpdateTaskStatus(id string, status task.Status) error
 }

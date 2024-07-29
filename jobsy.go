@@ -3,15 +3,16 @@ package jobsy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nex-gen-tech/jobsy/internal/queue"
 	"github.com/nex-gen-tech/jobsy/internal/scheduler"
 	"github.com/nex-gen-tech/jobsy/internal/storage"
 	"github.com/nex-gen-tech/jobsy/internal/task"
+	"github.com/robfig/cron"
 )
 
 // Worker manages the execution of background tasks
@@ -29,7 +30,7 @@ type Worker struct {
 	shutdownOnce    sync.Once                    // Once to ensure shutdown is only executed once.
 	debugCh         chan string                  // Channel used to receive debug messages from the worker.
 	tasksInProgress sync.Map                     // Map to store tasks in progress
-	taskQueues      map[uuid.UUID]chan struct{}  // Map to store task queues
+	taskQueues      map[string]chan struct{}     // Map to store task queues (now using string IDs)
 	queueMu         sync.Mutex                   // Mutex to synchronize access to task queues
 	priority        task.Priority                // Default priority for tasks
 	timeout         time.Duration                // Default timeout for tasks
@@ -87,7 +88,7 @@ func NewWorker(opts *WorkerOptions) *Worker {
 		shutdownCh:      make(chan struct{}),
 		debugCh:         make(chan string, 100),
 		tasksInProgress: sync.Map{},
-		taskQueues:      make(map[uuid.UUID]chan struct{}),
+		taskQueues:      make(map[string]chan struct{}),
 		priority:        priority,
 		timeout:         timeout,
 		maxRetry:        maxRetry,
@@ -314,7 +315,6 @@ type TaskOptions struct {
 
 // Schedule adds a new task to the worker
 func (w *Worker) Schedule(name string, f func() error, schedule string, opts ...TaskOptions) (*task.Task, error) {
-	id := uuid.New()
 	taskType := task.RecurringType
 	if schedule == "" {
 		taskType = task.OneTimeType
@@ -329,10 +329,24 @@ func (w *Worker) Schedule(name string, f func() error, schedule string, opts ...
 		timeOut = opts[0].TimeOut
 	}
 
-	t := task.NewTask(id, name, f, schedule, maxRetry, taskType, timeOut)
+	t := task.NewTask(name, f, schedule, maxRetry, taskType, timeOut)
 
 	if err := t.Validate(); err != nil {
 		return nil, err
+	}
+
+	existingTask, err := w.dbAdapter.LoadTask(t.ID)
+	if err == nil && existingTask != nil {
+		// Task already exists, return the existing task
+		return existingTask, nil
+	}
+
+	// Validate cron expression for recurring tasks
+	if taskType == task.RecurringType {
+		_, err := cron.ParseStandard(schedule)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cron expression: %v", err)
+		}
 	}
 
 	if err := w.dbAdapter.SaveTask(t); err != nil {
@@ -347,7 +361,6 @@ func (w *Worker) Schedule(name string, f func() error, schedule string, opts ...
 			return nil, err
 		}
 	} else {
-		// Use a non-blocking send to check if the queue is full or closed
 		select {
 		case w.taskChan <- t:
 			// Task enqueued successfully
@@ -361,8 +374,6 @@ func (w *Worker) Schedule(name string, f func() error, schedule string, opts ...
 
 // RunEvery schedules a task to run at regular intervals
 func (w *Worker) RunEvery(name string, f func() error, interval time.Duration, opts ...TaskOptions) (*task.Task, error) {
-	id := uuid.New()
-
 	maxRetry := w.maxRetry
 	if len(opts) > 0 && opts[0].MaxRetry != 0 {
 		maxRetry = opts[0].MaxRetry
@@ -372,7 +383,7 @@ func (w *Worker) RunEvery(name string, f func() error, interval time.Duration, o
 		timeOut = opts[0].TimeOut
 	}
 
-	t := task.NewTask(id, name, f, "", maxRetry, task.IntervalType, timeOut)
+	t := task.NewTask(name, f, "", maxRetry, task.IntervalType, timeOut)
 	t.SetInterval(interval)
 
 	if err := w.dbAdapter.SaveTask(t); err != nil {
@@ -391,8 +402,6 @@ func (w *Worker) RunEvery(name string, f func() error, interval time.Duration, o
 
 // RunNow runs a task immediately
 func (w *Worker) RunNow(name string, f func() error, opts ...TaskOptions) (*task.Task, error) {
-	id := uuid.New()
-
 	maxRetry := w.maxRetry
 	if len(opts) > 0 && opts[0].MaxRetry != 0 {
 		maxRetry = opts[0].MaxRetry
@@ -402,7 +411,7 @@ func (w *Worker) RunNow(name string, f func() error, opts ...TaskOptions) (*task
 		timeOut = opts[0].TimeOut
 	}
 
-	t := task.NewTask(id, name, f, "", maxRetry, task.OneTimeType, timeOut)
+	t := task.NewTask(name, f, "", maxRetry, task.OneTimeType, timeOut)
 
 	if err := t.Validate(); err != nil {
 		return nil, err
@@ -419,8 +428,6 @@ func (w *Worker) RunNow(name string, f func() error, opts ...TaskOptions) (*task
 
 // RunAt runs a task at a specific time once
 func (w *Worker) RunAt(name string, f func() error, executeAt time.Time, opts ...TaskOptions) (*task.Task, error) {
-	id := uuid.New()
-
 	maxRetry := w.maxRetry
 	if len(opts) > 0 && opts[0].MaxRetry != 0 {
 		maxRetry = opts[0].MaxRetry
@@ -430,7 +437,7 @@ func (w *Worker) RunAt(name string, f func() error, executeAt time.Time, opts ..
 		timeOut = opts[0].TimeOut
 	}
 
-	t := task.NewTask(id, name, f, "", maxRetry, task.OneTimeType, timeOut)
+	t := task.NewTask(name, f, "", maxRetry, task.OneTimeType, timeOut)
 	t.SetNextRunTime(executeAt)
 
 	if err := w.dbAdapter.SaveTask(t); err != nil {
@@ -445,7 +452,7 @@ func (w *Worker) RunAt(name string, f func() error, executeAt time.Time, opts ..
 }
 
 // GetTaskStatus returns the status of a task
-func (w *Worker) GetTaskStatus(id uuid.UUID) (task.Status, error) {
+func (w *Worker) GetTaskStatus(id string) (task.Status, error) {
 	t, err := w.dbAdapter.LoadTask(id)
 	if err != nil {
 		return "", err
@@ -548,7 +555,7 @@ func (w *Worker) Reset() {
 	w.shutdownCh = make(chan struct{})
 	w.shutdownOnce = sync.Once{}
 	w.tasksInProgress = sync.Map{}
-	w.taskQueues = make(map[uuid.UUID]chan struct{})
+	w.taskQueues = make(map[string]chan struct{})
 
 	// Use a very short timeout when waiting for ongoing operations
 	done := make(chan struct{})

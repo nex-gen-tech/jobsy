@@ -2,10 +2,9 @@ package task
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Status represents the current state of a Task
@@ -37,7 +36,7 @@ const (
 
 // Task represents a background job to be executed
 type Task struct {
-	ID           uuid.UUID     // Unique identifier for the task
+	ID           string        // Unique identifier for the task (name + datetime)
 	Name         string        // Name of the task
 	Func         func() error  // Function to be executed as part of the task
 	Status       Status        // Current status of the task
@@ -51,16 +50,21 @@ type Task struct {
 	ErrorMessage string        // Error message associated with the task, if any
 	mu           sync.RWMutex  // Mutex for concurrent access to task properties
 	Priority     Priority      // Priority level of the task
-	Dependencies []uuid.UUID   // List of task dependencies
+	Dependencies []string      // List of task dependencies (now using string IDs)
 	Timeout      time.Duration // Timeout duration for the task execution
 	Type         TaskType      // Type of the task
 	Interval     time.Duration // Interval for recurring tasks
 }
 
+// generate id for the task
+func GenerateID(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, " ", "_"))
+}
+
 // NewTask creates a new Task with the given parameters
-func NewTask(id uuid.UUID, name string, f func() error, schedule string, maxRetry int, taskType TaskType, timeout time.Duration) *Task {
+func NewTask(name string, f func() error, schedule string, maxRetry int, taskType TaskType, timeout time.Duration) *Task {
 	return &Task{
-		ID:        id,
+		ID:        GenerateID(name),
 		Name:      name,
 		Func:      f,
 		Schedule:  schedule,
@@ -142,7 +146,7 @@ func (t *Task) Reset() {
 
 // Validate checks if the task is valid
 func (t *Task) Validate() error {
-	if t.ID == uuid.Nil {
+	if t.ID == "" {
 		return errors.New("task ID cannot be empty")
 	}
 	if t.Func == nil {

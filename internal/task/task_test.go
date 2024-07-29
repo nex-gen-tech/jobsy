@@ -5,12 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewTask(t *testing.T) {
-	id := uuid.New()
 	name := "Test Task"
 	f := func() error { return nil }
 	schedule := "* * * * *"
@@ -18,22 +16,22 @@ func TestNewTask(t *testing.T) {
 	taskType := OneTimeType
 	timeout := 1 * time.Minute
 
-	task := NewTask(id, name, f, schedule, maxRetry, taskType, timeout)
+	taskRes := NewTask(name, f, schedule, maxRetry, taskType, timeout)
 
-	assert.Equal(t, id, task.ID)
-	assert.Equal(t, name, task.Name)
-	assert.NotNil(t, task.Func)
-	assert.Equal(t, schedule, task.Schedule)
-	assert.Equal(t, maxRetry, task.MaxRetry)
-	assert.Equal(t, StatusPending, task.Status)
-	assert.Equal(t, taskType, task.Type)
-	assert.Equal(t, timeout, task.Timeout)
-	assert.NotZero(t, task.CreatedAt)
+	assert.Equal(t, GenerateID(name), taskRes.ID)
+	assert.Equal(t, name, taskRes.Name)
+	assert.NotNil(t, taskRes.Func)
+	assert.Equal(t, schedule, taskRes.Schedule)
+	assert.Equal(t, maxRetry, taskRes.MaxRetry)
+	assert.Equal(t, StatusPending, taskRes.Status)
+	assert.Equal(t, taskType, taskRes.Type)
+	assert.Equal(t, timeout, taskRes.Timeout)
+	assert.NotZero(t, taskRes.CreatedAt)
 }
 
 func TestTask_Run(t *testing.T) {
 	t.Run("Successful Run", func(t *testing.T) {
-		task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+		task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 		err := task.Run()
 
 		assert.NoError(t, err)
@@ -44,7 +42,7 @@ func TestTask_Run(t *testing.T) {
 	})
 
 	t.Run("Failed Run", func(t *testing.T) {
-		task := NewTask(uuid.New(), "Test Task", func() error { return errors.New("test error") }, "", 3, OneTimeType, time.Minute)
+		task := NewTask("Test Task", func() error { return errors.New("test error") }, "", 3, OneTimeType, time.Minute)
 		err := task.Run()
 
 		assert.Error(t, err)
@@ -55,7 +53,7 @@ func TestTask_Run(t *testing.T) {
 	})
 
 	t.Run("Max Retries Reached", func(t *testing.T) {
-		task := NewTask(uuid.New(), "Test Task", func() error { return errors.New("test error") }, "", 1, OneTimeType, time.Minute)
+		task := NewTask("Test Task", func() error { return errors.New("test error") }, "", 1, OneTimeType, time.Minute)
 		_ = task.Run()
 		err := task.Run()
 
@@ -66,7 +64,7 @@ func TestTask_Run(t *testing.T) {
 }
 
 func TestTask_SetInterval(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, IntervalType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, IntervalType, time.Minute)
 	interval := 5 * time.Minute
 	task.SetInterval(interval)
 
@@ -74,7 +72,7 @@ func TestTask_SetInterval(t *testing.T) {
 }
 
 func TestTask_GetStatus(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 	assert.Equal(t, StatusPending, task.GetStatus())
 
 	task.SetStatus(StatusRunning)
@@ -82,7 +80,7 @@ func TestTask_GetStatus(t *testing.T) {
 }
 
 func TestTask_SetNextRunTime(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 	nextRun := time.Now().Add(1 * time.Hour)
 	task.SetNextRunTime(nextRun)
 
@@ -90,7 +88,7 @@ func TestTask_SetNextRunTime(t *testing.T) {
 }
 
 func TestTask_IsReadyToRun(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 
 	assert.False(t, task.IsReadyToRun(), "Task should not be ready to run with zero NextRunAt")
 
@@ -105,7 +103,7 @@ func TestTask_IsReadyToRun(t *testing.T) {
 }
 
 func TestTask_Reset(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 	task.Status = StatusCompleted
 	task.Retries = 2
 	task.ErrorMessage = "test error"
@@ -123,20 +121,26 @@ func TestTask_Reset(t *testing.T) {
 
 func TestTask_Validate(t *testing.T) {
 	t.Run("Valid Task", func(t *testing.T) {
-		task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+		task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 		err := task.Validate()
 		assert.NoError(t, err)
 	})
 
 	t.Run("Invalid ID", func(t *testing.T) {
-		task := NewTask(uuid.Nil, "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+		task := NewTask("", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 		err := task.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "task ID cannot be empty")
 	})
 
+	t.Run("ID Generation", func(t *testing.T) {
+		task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+		assert.NotEmpty(t, task.ID)
+		assert.Equal(t, "test_task", task.ID)
+	})
+
 	t.Run("Nil Function", func(t *testing.T) {
-		task := NewTask(uuid.New(), "Test Task", nil, "", 3, OneTimeType, time.Minute)
+		task := NewTask("Test Task", nil, "", 3, OneTimeType, time.Minute)
 		err := task.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "task function cannot be nil")
@@ -144,7 +148,7 @@ func TestTask_Validate(t *testing.T) {
 }
 
 func TestTask_SetStatus(t *testing.T) {
-	task := NewTask(uuid.New(), "Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
+	task := NewTask("Test Task", func() error { return nil }, "", 3, OneTimeType, time.Minute)
 	task.SetStatus(StatusRunning)
 	assert.Equal(t, StatusRunning, task.Status)
 

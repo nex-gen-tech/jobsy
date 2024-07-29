@@ -4,20 +4,19 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/google/uuid"
 	"github.com/nex-gen-tech/jobsy/internal/task"
 )
 
 // MemoryStorage is an in-memory implementation of the Storage interface.
 type MemoryStorage struct {
-	tasks map[uuid.UUID]*task.Task
+	tasks map[string]*task.Task
 	mu    sync.RWMutex
 }
 
 // NewMemoryStorage creates and returns a new instance of MemoryStorage.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		tasks: make(map[uuid.UUID]*task.Task),
+		tasks: make(map[string]*task.Task),
 	}
 }
 
@@ -30,7 +29,7 @@ func (m *MemoryStorage) SaveTask(t *task.Task) error {
 }
 
 // LoadTask loads the task with the specified ID from the in-memory storage.
-func (m *MemoryStorage) LoadTask(id uuid.UUID) (*task.Task, error) {
+func (m *MemoryStorage) LoadTask(id string) (*task.Task, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	t, ok := m.tasks[id]
@@ -52,7 +51,7 @@ func (m *MemoryStorage) LoadAllTasks() ([]*task.Task, error) {
 }
 
 // DeleteTask deletes the task with the specified ID from the in-memory storage.
-func (m *MemoryStorage) DeleteTask(id uuid.UUID) error {
+func (m *MemoryStorage) DeleteTask(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.tasks[id]; !ok {
@@ -63,7 +62,7 @@ func (m *MemoryStorage) DeleteTask(id uuid.UUID) error {
 }
 
 // UpdateTaskStatus updates the status of the task with the specified ID in the in-memory storage.
-func (m *MemoryStorage) UpdateTaskStatus(id uuid.UUID, status task.Status) error {
+func (m *MemoryStorage) UpdateTaskStatus(id string, status task.Status) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tasks[id]

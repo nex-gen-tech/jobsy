@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nex-gen-tech/jobsy/internal/queue"
 	"github.com/nex-gen-tech/jobsy/internal/scheduler"
 	"github.com/nex-gen-tech/jobsy/internal/task"
@@ -54,7 +53,7 @@ func (m *MockStorage) SaveTask(t *task.Task) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) LoadTask(id uuid.UUID) (*task.Task, error) {
+func (m *MockStorage) LoadTask(id string) (*task.Task, error) {
 	args := m.Called(id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -70,12 +69,12 @@ func (m *MockStorage) LoadAllTasks() ([]*task.Task, error) {
 	return args.Get(0).([]*task.Task), args.Error(1)
 }
 
-func (m *MockStorage) DeleteTask(id uuid.UUID) error {
+func (m *MockStorage) DeleteTask(id string) error {
 	args := m.Called(id)
 	return args.Error(0)
 }
 
-func (m *MockStorage) UpdateTaskStatus(id uuid.UUID, status task.Status) error {
+func (m *MockStorage) UpdateTaskStatus(id string, status task.Status) error {
 	args := m.Called(id, status)
 	return args.Error(0)
 }
@@ -104,16 +103,16 @@ type MockScheduler struct {
 	mock.Mock
 }
 
-func (m *MockScheduler) AddTask(id uuid.UUID, cronExpr string, task func()) error {
+func (m *MockScheduler) AddTask(id string, cronExpr string, task func()) error {
 	args := m.Called(id, cronExpr, task)
 	return args.Error(0)
 }
 
-func (m *MockScheduler) RemoveTask(id uuid.UUID) {
+func (m *MockScheduler) RemoveTask(id string) {
 	m.Called(id)
 }
 
-func (m *MockScheduler) ScheduleOnce(id uuid.UUID, when time.Time, task func()) {
+func (m *MockScheduler) ScheduleOnce(id string, when time.Time, task func()) {
 	m.Called(id, when, task)
 }
 
@@ -125,7 +124,7 @@ func (m *MockScheduler) Stop() {
 	m.Called()
 }
 
-func (m *MockScheduler) AddTaskWithInterval(id uuid.UUID, interval time.Duration, task func()) error {
+func (m *MockScheduler) AddTaskWithInterval(id string, interval time.Duration, task func()) error {
 	args := m.Called(id, interval, task)
 	return args.Error(0)
 }
@@ -227,15 +226,17 @@ func TestWorker_Schedule(t *testing.T) {
 		name       string
 		taskName   string
 		cronExpr   string
-		setupMocks func(*MockStorage, *scheduler.Scheduler)
+		setupMocks func(*MockStorage, *MockScheduler)
 		wantErr    bool
 	}{
 		{
 			name:     "Valid recurring task",
 			taskName: "Recurring Task",
-			cronExpr: "*/5 * * * * *",
-			setupMocks: func(ms *MockStorage, sch *scheduler.Scheduler) {
+			cronExpr: "*/5 * * * *",
+			setupMocks: func(ms *MockStorage, msch *MockScheduler) {
+				ms.On("LoadTask", mock.AnythingOfType("string")).Return(nil, errors.New("task not found")).Once()
 				ms.On("SaveTask", mock.AnythingOfType("*task.Task")).Return(nil)
+				msch.On("AddTask", mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("func()")).Return(nil)
 			},
 			wantErr: false,
 		},
@@ -243,16 +244,17 @@ func TestWorker_Schedule(t *testing.T) {
 			name:     "Invalid cron expression",
 			taskName: "Invalid Task",
 			cronExpr: "invalid",
-			setupMocks: func(ms *MockStorage, sch *scheduler.Scheduler) {
-				ms.On("SaveTask", mock.AnythingOfType("*task.Task")).Return(nil)
+			setupMocks: func(ms *MockStorage, msch *MockScheduler) {
+				ms.On("LoadTask", mock.AnythingOfType("string")).Return(nil, errors.New("task not found")).Once()
 			},
 			wantErr: true,
 		},
 		{
 			name:     "Storage error",
 			taskName: "Storage Error Task",
-			cronExpr: "*/5 * * * * *",
-			setupMocks: func(ms *MockStorage, sch *scheduler.Scheduler) {
+			cronExpr: "*/5 * * * *",
+			setupMocks: func(ms *MockStorage, msch *MockScheduler) {
+				ms.On("LoadTask", mock.AnythingOfType("string")).Return(nil, errors.New("task not found")).Once()
 				ms.On("SaveTask", mock.AnythingOfType("*task.Task")).Return(errors.New("storage error"))
 			},
 			wantErr: true,
@@ -262,25 +264,29 @@ func TestWorker_Schedule(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStorage := new(MockStorage)
-			sch := scheduler.NewScheduler()
+			mockScheduler := new(MockScheduler)
 
 			w := &Worker{
-				scheduler: sch,
+				scheduler: mockScheduler,
 				dbAdapter: mockStorage,
 				queue:     queue.NewQueue(),
 			}
 
-			tt.setupMocks(mockStorage, sch)
+			tt.setupMocks(mockStorage, mockScheduler)
 
 			_, err := w.Schedule(tt.taskName, func() error { return nil }, tt.cronExpr)
 
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.name == "Invalid cron expression" {
+					assert.Contains(t, err.Error(), "invalid cron expression")
+				}
 			} else {
 				assert.NoError(t, err)
 			}
 
 			mockStorage.AssertExpectations(t)
+			mockScheduler.AssertExpectations(t)
 		})
 	}
 }
@@ -429,7 +435,7 @@ func TestWorker_RunAt(t *testing.T) {
 func TestWorker_GetTaskStatus(t *testing.T) {
 	tests := []struct {
 		name       string
-		taskID     uuid.UUID
+		taskID     string
 		setupMocks func(*MockStorage)
 		wantStatus task.Status
 		wantErr    bool
@@ -437,7 +443,7 @@ func TestWorker_GetTaskStatus(t *testing.T) {
 	}{
 		{
 			name:   "Existing task",
-			taskID: uuid.New(),
+			taskID: task.GenerateID("Running Task"),
 			setupMocks: func(ms *MockStorage) {
 				ms.On("LoadTask", mock.Anything).Return(&task.Task{Status: task.StatusRunning}, nil)
 			},
@@ -446,7 +452,7 @@ func TestWorker_GetTaskStatus(t *testing.T) {
 		},
 		{
 			name:   "Non-existent task",
-			taskID: uuid.New(),
+			taskID: task.GenerateID("Non-existent Task"),
 			setupMocks: func(ms *MockStorage) {
 				ms.On("LoadTask", mock.Anything).Return(nil, nil)
 			},
@@ -456,7 +462,7 @@ func TestWorker_GetTaskStatus(t *testing.T) {
 		},
 		{
 			name:   "Storage error",
-			taskID: uuid.New(),
+			taskID: task.GenerateID("Error Task"),
 			setupMocks: func(ms *MockStorage) {
 				ms.On("LoadTask", mock.Anything).Return(nil, errors.New("storage error"))
 			},
@@ -503,13 +509,13 @@ func TestWorker_GetAllTasks(t *testing.T) {
 			name: "Multiple tasks",
 			setupMocks: func(ms *MockStorage) {
 				ms.On("LoadAllTasks").Return([]*task.Task{
-					{ID: uuid.New(), Name: "Task 1"},
-					{ID: uuid.New(), Name: "Task 2"},
+					{ID: task.GenerateID("Task 1"), Name: "Task 1"},
+					{ID: task.GenerateID("Task 2"), Name: "Task 2"},
 				}, nil)
 			},
 			wantTasks: []*task.Task{
-				{ID: uuid.New(), Name: "Task 1"},
-				{ID: uuid.New(), Name: "Task 2"},
+				{ID: task.GenerateID("Task 1"), Name: "Task 1"},
+				{ID: task.GenerateID("Task 2"), Name: "Task 2"},
 			},
 			wantErr: false,
 		},
@@ -569,7 +575,7 @@ func TestWorker_executeTask(t *testing.T) {
 		{
 			name: "Successful task execution",
 			task: &task.Task{
-				ID:   uuid.New(),
+				ID:   task.GenerateID("Successful Task"),
 				Name: "Successful Task",
 				Func: func() error {
 					time.Sleep(50 * time.Millisecond) // Reduced sleep time
@@ -579,14 +585,14 @@ func TestWorker_executeTask(t *testing.T) {
 				Type: task.OneTimeType,
 			},
 			setupMocks: func(ms *MockStorage) {
-				ms.On("UpdateTaskStatus", mock.AnythingOfType("uuid.UUID"), task.StatusCompleted).Return(nil).Once()
+				ms.On("UpdateTaskStatus", mock.AnythingOfType("string"), task.StatusCompleted).Return(nil).Once()
 			},
 			wantStatus: task.StatusCompleted,
 		},
 		{
 			name: "Failed task execution",
 			task: &task.Task{
-				ID:   uuid.New(),
+				ID:   task.GenerateID("Failed Task"),
 				Name: "Failed Task",
 				Func: func() error {
 					time.Sleep(50 * time.Millisecond) // Reduced sleep time
@@ -596,7 +602,7 @@ func TestWorker_executeTask(t *testing.T) {
 				Type: task.OneTimeType,
 			},
 			setupMocks: func(ms *MockStorage) {
-				ms.On("UpdateTaskStatus", mock.AnythingOfType("uuid.UUID"), task.StatusFailed).Return(nil).Once()
+				ms.On("UpdateTaskStatus", mock.AnythingOfType("string"), task.StatusFailed).Return(nil).Once()
 			},
 			wantStatus: task.StatusFailed,
 		},
@@ -631,7 +637,7 @@ func TestWorker_handleTaskTimeout(t *testing.T) {
 		{
 			name: "One-time task timeout",
 			task: &task.Task{
-				ID:   uuid.New(),
+				ID:   task.GenerateID("One-time Task"),
 				Name: "One-time Task",
 				Type: task.OneTimeType,
 			},
@@ -643,7 +649,7 @@ func TestWorker_handleTaskTimeout(t *testing.T) {
 		{
 			name: "Recurring task timeout",
 			task: &task.Task{
-				ID:       uuid.New(),
+				ID:       task.GenerateID("Recurring Task"),
 				Name:     "Recurring Task",
 				Type:     task.RecurringType,
 				Retries:  2,
@@ -694,7 +700,7 @@ func TestWorker_rescheduleTask(t *testing.T) {
 		{
 			name: "Reschedule within retry limit",
 			task: &task.Task{
-				ID:       uuid.New(),
+				ID:       task.GenerateID("Retryable Task"),
 				Name:     "Retryable Task",
 				Retries:  1,
 				MaxRetry: 3,
@@ -708,7 +714,7 @@ func TestWorker_rescheduleTask(t *testing.T) {
 		{
 			name: "Exceed retry limit",
 			task: &task.Task{
-				ID:       uuid.New(),
+				ID:       task.GenerateID("Max Retries Task"),
 				Name:     "Max Retries Task",
 				Retries:  3,
 				MaxRetry: 3,

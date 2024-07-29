@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nex-gen-tech/jobsy/internal/task"
 	"github.com/stretchr/testify/assert"
 )
@@ -143,7 +142,7 @@ func TestQueue(t *testing.T) {
 }
 
 func createTask(name string, priority task.Priority) *task.Task {
-	t := task.NewTask(uuid.New(), name, func() error { return nil }, "", 1, task.OneTimeType, time.Minute*1)
+	t := task.NewTask(name, func() error { return nil }, "", 1, task.OneTimeType, time.Minute*1)
 	t.Priority = priority
 	return t
 }

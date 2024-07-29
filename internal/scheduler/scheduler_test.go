@@ -2,11 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,7 +18,7 @@ func TestNewScheduler(t *testing.T) {
 
 func TestAddTask(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan bool, 1)
 
 	err := s.AddTask(id, "* * * * * *", func() {
@@ -41,7 +41,7 @@ func TestAddTask(t *testing.T) {
 
 func TestRemoveTask(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan bool, 1)
 
 	err := s.AddTask(id, "* * * * * *", func() {
@@ -66,7 +66,7 @@ func TestRemoveTask(t *testing.T) {
 
 func TestScheduleOnce(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan bool, 1)
 
 	s.ScheduleOnce(id, time.Now().Add(500*time.Millisecond), func() {
@@ -83,7 +83,7 @@ func TestScheduleOnce(t *testing.T) {
 
 func TestAddTaskWithInterval(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan bool, 3)
 
 	err := s.AddTaskWithInterval(id, 200*time.Millisecond, func() {
@@ -117,12 +117,12 @@ func TestConcurrency(t *testing.T) {
 
 	for i := 0; i < taskCount; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			id := uuid.New()
+			id := fmt.Sprintf("test_task_%d_%s", i, time.Now().Format("20060102150405"))
 			err := s.AddTask(id, "* * * * * *", func() {})
 			assert.NoError(t, err)
-		}()
+		}(i)
 	}
 
 	wg.Wait()
@@ -132,7 +132,7 @@ func TestConcurrency(t *testing.T) {
 
 func TestStartAndStop(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan bool, 1)
 
 	err := s.AddTask(id, "* * * * * *", func() {
@@ -167,7 +167,7 @@ func TestStartAndStop(t *testing.T) {
 
 func TestScheduleOnceOverwrite(t *testing.T) {
 	s := NewScheduler()
-	id := uuid.New()
+	id := fmt.Sprintf("test_task_%s", time.Now().Format("20060102150405"))
 	executed := make(chan int, 2)
 
 	s.ScheduleOnce(id, time.Now().Add(500*time.Millisecond), func() {
@@ -193,5 +193,38 @@ func TestScheduleOnceOverwrite(t *testing.T) {
 		t.Fatal("Both tasks were executed, but only one should have been")
 	case <-time.After(500 * time.Millisecond):
 		// Expected behavior: no second execution
+	}
+}
+
+func TestTaskRecovery(t *testing.T) {
+	s := NewScheduler()
+	id := fmt.Sprintf("recoverable_task_%s", time.Now().Format("20060102150405"))
+	executed := make(chan bool, 1)
+
+	// Add a task
+	err := s.AddTask(id, "*/5 * * * * *", func() {
+		executed <- true
+	})
+	assert.NoError(t, err)
+
+	// Simulate a restart by creating a new scheduler
+	s2 := NewScheduler()
+
+	// Manually add the task to s2 to simulate recovery
+	err = s2.AddTask(id, "*/5 * * * * *", func() {
+		executed <- true
+	})
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go s2.Start(ctx)
+
+	select {
+	case <-executed:
+		// Task recovered and executed successfully
+	case <-ctx.Done():
+		t.Fatal("Recovered task was not executed within the expected time")
 	}
 }

@@ -6,25 +6,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 )
 
 var _ SchedulerInterface = (*Scheduler)(nil)
 
 type SchedulerInterface interface {
-	AddTask(id uuid.UUID, cronExpr string, task func()) error
-	RemoveTask(id uuid.UUID)
-	ScheduleOnce(id uuid.UUID, when time.Time, task func())
+	AddTask(id string, cronExpr string, task func()) error
+	RemoveTask(id string)
+	ScheduleOnce(id string, when time.Time, task func())
 	Start(ctx context.Context)
 	Stop()
-	AddTaskWithInterval(id uuid.UUID, interval time.Duration, task func()) error
+	AddTaskWithInterval(id string, interval time.Duration, task func()) error
 }
 
 // Scheduler represents a job scheduler.
 type Scheduler struct {
 	cron     *cron.Cron
-	jobs     map[uuid.UUID]cron.EntryID
+	jobs     map[string]cron.EntryID
 	onceJobs sync.Map
 	mu       sync.RWMutex
 	stopCh   chan struct{}
@@ -36,7 +35,7 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	return &Scheduler{
 		cron:   cron.New(cron.WithSeconds()),
-		jobs:   make(map[uuid.UUID]cron.EntryID),
+		jobs:   make(map[string]cron.EntryID),
 		stopCh: make(chan struct{}),
 		doneCh: make(chan struct{}),
 		logger: log.New(log.Writer(), "SCHEDULER: ", log.LstdFlags),
@@ -46,7 +45,7 @@ func NewScheduler() *Scheduler {
 // AddTask adds a task to the scheduler with the specified ID, cron expression, and task function.
 // If a task with the same ID already exists, it does nothing and returns nil.
 // Otherwise, it schedules the task to run at the specified cron expression and returns nil.
-func (s *Scheduler) AddTask(id uuid.UUID, cronExpr string, task func()) error {
+func (s *Scheduler) AddTask(id string, cronExpr string, task func()) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -64,7 +63,7 @@ func (s *Scheduler) AddTask(id uuid.UUID, cronExpr string, task func()) error {
 }
 
 // RemoveTask removes a task from the scheduler with the specified ID.
-func (s *Scheduler) RemoveTask(id uuid.UUID) {
+func (s *Scheduler) RemoveTask(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -80,7 +79,7 @@ func (s *Scheduler) RemoveTask(id uuid.UUID) {
 
 // ScheduleOnce schedules a task to run once at the specified time.
 // If a task with the same ID is already scheduled, it cancels the existing timer and schedules the new task.
-func (s *Scheduler) ScheduleOnce(id uuid.UUID, when time.Time, task func()) {
+func (s *Scheduler) ScheduleOnce(id string, when time.Time, task func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -145,7 +144,7 @@ func (s *Scheduler) Stop() {
 // It takes an ID, interval duration, and a task function as parameters.
 // If a task with the same ID already exists, it does nothing and returns nil.
 // Otherwise, it schedules the task to run at the specified interval and returns nil.
-func (s *Scheduler) AddTaskWithInterval(id uuid.UUID, interval time.Duration, task func()) error {
+func (s *Scheduler) AddTaskWithInterval(id string, interval time.Duration, task func()) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
