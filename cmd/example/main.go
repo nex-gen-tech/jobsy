@@ -27,15 +27,15 @@ func main() {
 		}
 	}()
 
-	// // 1. Periodic Task (every 5 seconds)
-	// periodicTask, err := w.AddTask("Periodic Task", func() error {
-	// 	fmt.Println("Executing Periodic Task")
-	// 	return nil
-	// }, "*/5 * * * * *", 3)
-	// if err != nil {
-	// 	log.Fatalf("Failed to add Periodic Task: %v", err)
-	// }
-	// fmt.Printf("Added Periodic Task with ID: %s\n", periodicTask.ID)
+	// 1. Periodic Task (every 5 seconds)
+	periodicTask, err := w.Schedule("Periodic Task", func() error {
+		fmt.Println("Executing Periodic Task")
+		return nil
+	}, "0/5 * * * * ?")
+	if err != nil {
+		log.Fatalf("Failed to add Periodic Task: %v", err)
+	}
+	fmt.Printf("Added Periodic Task with ID: %s\n", periodicTask.ID)
 
 	// 2. Immediate Task
 	immediateTask, err := w.Schedule("Immediate Task", func() error {

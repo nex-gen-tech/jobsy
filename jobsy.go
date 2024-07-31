@@ -3,7 +3,6 @@ package jobsy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/nex-gen-tech/jobsy/internal/scheduler"
 	"github.com/nex-gen-tech/jobsy/internal/storage"
 	"github.com/nex-gen-tech/jobsy/internal/task"
-	"github.com/robfig/cron"
 )
 
 // Worker manages the execution of background tasks
@@ -339,14 +337,6 @@ func (w *Worker) Schedule(name string, f func() error, schedule string, opts ...
 	if err == nil && existingTask != nil {
 		// Task already exists, return the existing task
 		return existingTask, nil
-	}
-
-	// Validate cron expression for recurring tasks
-	if taskType == task.RecurringType {
-		_, err := cron.ParseStandard(schedule)
-		if err != nil {
-			return nil, fmt.Errorf("invalid cron expression: %v", err)
-		}
 	}
 
 	if err := w.dbAdapter.SaveTask(t); err != nil {
